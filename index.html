@@ -426,12 +426,15 @@ function doCollapseVisual(winnerIdx,winnerName,total,net,event){
   updUI();
 }
 
-function pidxCol(p){return(p<players.length)?players[p].col:'#888';}
+function pidxCol(p){return(p>=0&&p<players.length)?players[p].col:'#555';}
 function showPop(txt,col){var p=document.getElementById('pop');p.textContent=txt;p.style.color=col;gsap.killTweensOf(p);gsap.fromTo(p,{opacity:0,y:0,scale:.5},{opacity:1,y:-40,scale:1,duration:.5,ease:'back.out(2)',onComplete:function(){gsap.to(p,{opacity:0,y:-70,duration:.6,delay:1.2,ease:'power2.in'});}});}
 
 // Drop
 function myDrop(){
-  if(!connected||collapsed||myIdx===-1)return;if(players[myIdx]&&players[myIdx].bal<1){addLog("You're broke!",'s');return;}
+  if(!connected||collapsed||myIdx===-1)return;
+  var mp=players[myIdx];if(!mp||mp.bal<1){addLog("You're broke!",'s');return;}
+  // Client-side rate limit
+  var now=Date.now();if(myDrop._last&&(now-myDrop._last)<200)return;myDrop._last=now;
   var ox=(Math.random()-.5)*22;launchChip(myIdx,ox);players[myIdx].bal-=1;players[myIdx].drops++;
   addLog(players[myIdx].name+' dropped 1p','d');updUI();
   ws.send(JSON.stringify({type:'drop',ox:ox}));pendingMyDrops++;
@@ -449,7 +452,13 @@ function connect(){
 function handleMsg(msg){
   switch(msg.type){
     case'welcome':roomId=msg.roomId;myIdx=msg.yourIdx;myName=msg.yourName;if(history.replaceState)history.replaceState(null,'','?room='+roomId);document.getElementById('rlabel').textContent=roomId+' \u2014 copy link';addLog('You joined as '+myName,'s');break;
-    case'state':players=msg.players;house=msg.house;for(var i=0;i<players.length;i++){if(players[i].isYou){myIdx=i;break;}}if(inflights.length===0&&!collapsed)syncStack(msg.stack);collapsed=msg.collapsed;pendingMyDrops=0;updUI();break;
+    case'state':players=msg.players;house=msg.house;for(var i=0;i<players.length;i++){if(players[i].isYou){myIdx=i;break;}}
+      if(inflights.length===0&&!collapsed)syncStack(msg.stack);
+      // Clamp pidx on inflight/faller chips to valid range
+      var pLen=players.length;
+      for(var i=0;i<inflights.length;i++){if(inflights[i].pidx>=pLen)inflights[i].pidx=Math.max(0,pLen-1);}
+      for(var i=0;i<fallers.length;i++){if(fallers[i].pidx>=pLen)fallers[i].pidx=Math.max(0,pLen-1);}
+      collapsed=msg.collapsed;pendingMyDrops=0;updUI();break;
     case'drop':if(msg.pidx===myIdx&&pendingMyDrops>0){pendingMyDrops--;if(msg.pidx<players.length)players[msg.pidx].bal=msg.bal;}else{addLog(msg.name+' dropped 1p','d');launchChip(msg.pidx,msg.ox);if(msg.pidx<players.length){players[msg.pidx].drops++;players[msg.pidx].bal=msg.bal;}}updUI();break;
     case'collapse':house=msg.house;if(msg.balances){for(var i=0;i<msg.balances.length&&i<players.length;i++)players[i].bal=msg.balances[i];}pendingMyDrops=0;var ev={winnerIdx:msg.winnerIdx,winnerName:msg.winnerName,total:msg.total,net:msg.net,event:msg.event||'bomb'};if(inflights.length>0)pendingCollapse=ev;else doCollapseVisual(ev.winnerIdx,ev.winnerName,ev.total,ev.net,ev.event);updUI();break;
     case'newRound':setTimeout(function(){collapsed=false;addLog('--- Round '+msg.roundNum+' ---','s');updUI();},3500);break;
@@ -557,10 +566,21 @@ function updUI(){
   pe.textContent=(pnl>=0?'+':'')+Math.round(pnl)+'p';pe.className='v '+(pnl>=0?'pos':'neg');
   document.getElementById('ht').textContent=house.toFixed(1);
   document.getElementById('pcount').textContent=players.length+' / 6';
-  var h='';
-  for(var i=0;i<players.length;i++){var p=players[i];h+='<div class="pc"><div class="pa" style="background:'+p.col+'">'+p.name.charAt(0)+'</div><span class="pn-name'+(p.isYou?' me':'')+'">'+p.name+(p.isYou?' (you)':'')+'</span><span class="pd">'+p.drops+'</span></div>';}
-  for(var i=players.length;i<6;i++)h+='<div class="es">Waiting for player...</div>';
-  if(h!==lastPH){document.getElementById('plist').innerHTML=h;lastPH=h;}
+  // Build player list safely (no innerHTML with user data)
+  var pKey='';for(var i=0;i<players.length;i++)pKey+=players[i].name+players[i].drops+players[i].col+(players[i].isYou?'y':'n');
+  pKey+=players.length;
+  if(pKey!==lastPH){
+    var pl=document.getElementById('plist');pl.innerHTML='';
+    for(var i=0;i<players.length;i++){var p=players[i];
+      var row=document.createElement('div');row.className='pc';
+      var av=document.createElement('div');av.className='pa';av.style.background=p.col;av.textContent=p.name.charAt(0);
+      var nm=document.createElement('span');nm.className='pn-name'+(p.isYou?' me':'');nm.textContent=p.name+(p.isYou?' (you)':'');
+      var dr=document.createElement('span');dr.className='pd';dr.textContent=p.drops;
+      row.appendChild(av);row.appendChild(nm);row.appendChild(dr);pl.appendChild(row);
+    }
+    for(var i=players.length;i<6;i++){var es=document.createElement('div');es.className='es';es.textContent='Waiting for player...';pl.appendChild(es);}
+    lastPH=pKey;
+  }
   var btn=document.getElementById('dbtn');btn.disabled=!connected||collapsed||!myP||myP.bal<1;
   btn.textContent=!connected?'CONNECTING...':!myP?'JOINING...':myP.bal<1?'BROKE':'DROP 1p';
 }

@@ -11,6 +11,8 @@ const wss = new WebSocketServer({ server });
 const PORT = process.env.PORT || 3000;
 const HCUT = 0.015;
 const MAX_PLAYERS = 6;
+const DROP_COOLDOWN_MS = 200; // rate limit: 1 drop per 200ms per player
+const COLLAPSE_RESUME_MS = 5500;
 
 const NAMES = [
   'CryptoKing','LuckyLucy','NightOwl','BettyBoom','IceCold420',
@@ -20,19 +22,14 @@ const NAMES = [
 ];
 
 const COLORS = ['#f0c040','#3498db','#2ecc71','#9b59b6','#e67e22','#1abc9c','#ff6b6b','#00bcd4','#ff9800','#8bc34a'];
+const EVENTS = ['bomb','lightning','tsunami','cat','meteor','ufo'];
 
 function pickColor(room) {
   const taken = new Set(room.players.map(p => p.col));
   for (const col of COLORS) {
     if (!taken.has(col)) return col;
   }
-  return '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6,'0');
-}
-
-const rooms = new Map();
-
-function genRoomId() {
-  return crypto.randomBytes(3).toString('hex');
+  return '#' + crypto.randomBytes(3).toString('hex');
 }
 
 function pickName(room) {
@@ -42,12 +39,23 @@ function pickName(room) {
   return 'Player' + (room.players.length + 1);
 }
 
+// Sanitize player name — strip anything that could be XSS
+function sanitize(str) {
+  return String(str).replace(/[<>&"'`]/g, '').slice(0, 20);
+}
+
+const rooms = new Map();
+
+function genRoomId() {
+  return crypto.randomBytes(3).toString('hex');
+}
+
 function createRoom(id) {
   return {
     id,
     players: [],
     stack: [],        // [{pidx}]
-    seq: 0,           // global sequence counter
+    seq: 0,
     house: 0,
     roundNum: 1,
     collapsed: false,
@@ -58,12 +66,12 @@ function createRoom(id) {
 function broadcast(room, msg) {
   const data = JSON.stringify(msg);
   for (const p of room.players) {
-    if (p.ws.readyState === 1) p.ws.send(data);
+    if (p.ws && p.ws.readyState === 1) p.ws.send(data);
   }
 }
 
 function sendTo(ws, msg) {
-  if (ws.readyState === 1) ws.send(JSON.stringify(msg));
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
 }
 
 function fullState(room, forIdx) {
@@ -81,24 +89,40 @@ function fullState(room, forIdx) {
   };
 }
 
+function broadcastFullState(room) {
+  for (let i = 0; i < room.players.length; i++) {
+    sendTo(room.players[i].ws, fullState(room, i));
+  }
+}
+
 // ===== GAME LOGIC =====
 function handleDrop(room, playerIdx, clientOx) {
   const player = room.players[playerIdx];
-  if (!player || room.collapsed || player.bal < 1) return;
+  if (!player || room.collapsed) return;
+
+  // Server-authoritative balance check
+  if (player.bal < 1) return;
+
+  // Rate limit
+  const now = Date.now();
+  if (player.lastDrop && (now - player.lastDrop) < DROP_COOLDOWN_MS) return;
+  player.lastDrop = now;
 
   room.seq++;
   player.bal -= 1;
   player.drops++;
 
-  // Use the ox from the dropping client so their optimistic animation matches
-  const ox = (typeof clientOx === 'number') ? Math.max(-11, Math.min(11, clientOx)) : (Math.random() - 0.5) * 22;
+  // Clamp client ox to valid range
+  const ox = (typeof clientOx === 'number' && isFinite(clientOx))
+    ? Math.max(-11, Math.min(11, clientOx))
+    : (Math.random() - 0.5) * 22;
+
   room.stack.push({ pidx: playerIdx });
 
   const len = room.stack.length;
   const collapseChance = len <= 4 ? 0 : 0.03 + (len - 4) * 0.025;
   const willCollapse = Math.random() < collapseChance;
 
-  // Send drop + collapse info in ONE message — no delay
   broadcast(room, {
     type: 'drop',
     seq: room.seq,
@@ -112,11 +136,11 @@ function handleDrop(room, playerIdx, clientOx) {
   });
 
   if (willCollapse) {
-    // Pick a random collapse event — server decides so all clients see same one
-    const EVENTS = ['bomb','lightning','tsunami','cat','meteor','ufo'];
     const event = EVENTS[Math.floor(Math.random() * EVENTS.length)];
     doCollapse(room, playerIdx, event);
   }
+
+  console.log(`[${room.id}] ${player.name} dropped (stack:${len}, bal:${player.bal}${willCollapse ? ', COLLAPSE!' : ''})`);
 }
 
 function doCollapse(room, winnerIdx, event) {
@@ -126,10 +150,9 @@ function doCollapse(room, winnerIdx, event) {
   const net = total - cut;
   room.house += cut;
 
-  const winner = room.players[winnerIdx];
+  const winner = (winnerIdx >= 0 && winnerIdx < room.players.length) ? room.players[winnerIdx] : null;
   if (winner) winner.bal += net;
 
-  // Collapse details sent separately so clients can sequence the animation
   broadcast(room, {
     type: 'collapse',
     seq: room.seq,
@@ -146,27 +169,27 @@ function doCollapse(room, winnerIdx, event) {
   room.stack = [];
   room.roundNum++;
 
-  // Resume after clients finish animation
+  console.log(`[${room.id}] COLLAPSE! ${event} — ${winner ? winner.name : '???'} wins ${net.toFixed(1)}p (${total} chips, house:${room.house.toFixed(1)})`);
+
+  // Resume after cutscene
   if (room.collapseTimer) clearTimeout(room.collapseTimer);
   room.collapseTimer = setTimeout(() => {
     room.collapsed = false;
     room.collapseTimer = null;
-
-    // Fresh state sync to correct any drift
-    for (let i = 0; i < room.players.length; i++) {
-      sendTo(room.players[i].ws, fullState(room, i));
-    }
+    broadcastFullState(room);
     broadcast(room, { type: 'newRound', roundNum: room.roundNum });
-  }, 5500);
+  }, COLLAPSE_RESUME_MS);
 }
 
 function removePlayer(room, playerIdx) {
   const player = room.players[playerIdx];
   if (!player) return;
 
+  console.log(`[${room.id}] ${player.name} left (${room.players.length - 1} remaining)`);
+
   room.players.splice(playerIdx, 1);
 
-  // Fix stack references
+  // Fix stack pidx references
   room.stack = room.stack.filter(ch => ch.pidx !== playerIdx).map(ch => ({
     pidx: ch.pidx > playerIdx ? ch.pidx - 1 : ch.pidx,
   }));
@@ -179,15 +202,16 @@ function removePlayer(room, playerIdx) {
     playerCount: room.players.length,
   });
 
-  // Full state resync for everyone
-  for (let i = 0; i < room.players.length; i++) {
-    sendTo(room.players[i].ws, fullState(room, i));
-  }
+  // Full resync fixes stale indices on all clients
+  broadcastFullState(room);
 
+  // Clean up empty rooms (check reference identity to avoid deleting recreated rooms)
   if (room.players.length === 0) {
+    const roomRef = room;
     setTimeout(() => {
-      if (rooms.has(room.id) && rooms.get(room.id).players.length === 0) {
-        rooms.delete(room.id);
+      if (rooms.has(roomRef.id) && rooms.get(roomRef.id) === roomRef && roomRef.players.length === 0) {
+        rooms.delete(roomRef.id);
+        console.log(`[${roomRef.id}] Room cleaned up (empty)`);
       }
     }, 60000);
   }
@@ -214,14 +238,17 @@ wss.on('connection', (ws, req) => {
   const playerIdx = room.players.length;
   const player = {
     id: crypto.randomBytes(4).toString('hex'),
-    name: pickName(room),
+    name: sanitize(pickName(room)),
     col: pickColor(room),
     ws,
     bal: 100,
     drops: 0,
+    lastDrop: 0,
   };
   room.players.push(player);
   room.seq++;
+
+  console.log(`[${room.id}] ${player.name} joined (${room.players.length}/${MAX_PLAYERS})`);
 
   sendTo(ws, {
     type: 'welcome',
@@ -239,7 +266,7 @@ wss.on('connection', (ws, req) => {
     playerCount: room.players.length,
   });
 
-  // Resync everyone so they see the new player
+  // Resync everyone
   for (let i = 0; i < room.players.length; i++) {
     if (room.players[i].ws !== ws) {
       sendTo(room.players[i].ws, fullState(room, i));
