@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chip Stacker</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a1a;color:#eee;font-family:'Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;user-select:none}
+h1{margin:8px 0 2px;font-size:1.3em;color:#f0c040;text-shadow:0 0 12px rgba(240,192,64,.5);letter-spacing:2px}
+.sub{color:#666;font-size:.7em;margin-bottom:6px;letter-spacing:1px}
+.room-link{font-size:.6em;color:#3498db;cursor:pointer;margin-bottom:6px;padding:3px 10px;background:rgba(52,152,219,.08);border:1px solid rgba(52,152,219,.2);border-radius:6px;transition:all .2s}
+.room-link:hover{background:rgba(52,152,219,.15)}
+.room-link .copied{color:#2ecc71;font-weight:700}
+.conn-status{font-size:.55em;margin-bottom:4px;letter-spacing:1px}
+.conn-status.ok{color:#2ecc71}.conn-status.bad{color:#e74c3c}.conn-status.wait{color:#f0c040}
+.wrap{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;justify-content:center;padding:0 6px}
+.panel{background:linear-gradient(180deg,#141428,#0e0e22);border-radius:10px;padding:10px;width:210px;border:1px solid #1a1a3a;box-shadow:0 4px 20px rgba(0,0,0,.5)}
+.panel h3{color:#f0c040;margin-bottom:6px;font-size:.78em;border-bottom:1px solid #1a1a3a;padding-bottom:4px;letter-spacing:1px}
+.pot{text-align:center;margin:8px 0;padding:12px;background:rgba(231,76,60,.08);border:2px solid rgba(231,76,60,.25);border-radius:12px}
+.pot .v{font-size:2em;color:#e74c3c;font-weight:700;text-shadow:0 0 15px rgba(231,76,60,.5)}
+.pot .l{font-size:.6em;color:#644;letter-spacing:2px;margin-bottom:2px}
+.bal{text-align:center;margin:6px 0;padding:8px;background:rgba(240,192,64,.05);border:1px solid rgba(240,192,64,.12);border-radius:8px}
+.bal .v{font-size:1.4em;color:#f0c040;font-weight:700}
+.bal .l{font-size:.55em;color:#665;letter-spacing:1px}
+.sr{display:flex;justify-content:space-between;margin-bottom:3px;font-size:.75em}
+.sr .l{color:#556}.sr .v{color:#ddd;font-weight:700}
+.pcard{display:flex;align-items:center;gap:6px;padding:4px 6px;margin-bottom:2px;border-radius:6px;font-size:.7em;transition:all .2s}
+.pcard .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.pcard .nm{flex:1;color:#aaa;font-weight:600}
+.pcard .nm.me{color:#f0c040}
+.empty-slot{padding:4px 6px;margin-bottom:2px;font-size:.65em;color:#333;border:1px dashed #1a1a3a;border-radius:6px;text-align:center}
+.cc{position:relative;border-radius:12px;overflow:hidden;border:2px solid #1a1a3a;box-shadow:0 0 40px rgba(10,10,40,.8);cursor:pointer}
+canvas{display:block}
+.ctrls{display:flex;gap:8px;margin-top:8px;justify-content:center}
+.bd{background:linear-gradient(180deg,#e74c3c,#c0392b);color:#fff;padding:12px 40px;font-size:1em;font-weight:700;border:none;border-radius:8px;cursor:pointer;box-shadow:0 4px 15px rgba(231,76,60,.4);transition:all .2s}
+.bd:hover{transform:translateY(-2px)}.bd:disabled{background:#333;cursor:not-allowed;transform:none;box-shadow:none}
+.log{max-height:260px;overflow-y:auto;font-size:.64em;color:#556;line-height:1.5;scrollbar-width:thin;scrollbar-color:#222 transparent}
+.log div{padding:1px 0}
+.log .w{color:#2ecc71;font-weight:700}.log .j{color:#f0c040;font-weight:700}
+.log .d{color:#445}.log .b{color:#e67e22;font-weight:700}.log .s{color:#f0c040}
+.ht{margin-top:4px;font-size:.65em;color:#333;text-align:center}
+.pop{position:absolute;top:35%;left:50%;transform:translate(-50%,-50%) scale(.5);font-size:2em;font-weight:700;pointer-events:none;opacity:0;transition:all .5s cubic-bezier(.2,.8,.2,1.2);text-shadow:0 4px 20px rgba(0,0,0,.9);z-index:10;white-space:nowrap}
+.pop.show{opacity:1;transform:translate(-50%,-75%) scale(1)}
+.dh{text-align:center;font-size:.55em;color:#334;margin-top:3px}
+</style>
+</head>
+<body>
+<h1>CHIP STACKER</h1>
+<p class="sub">MULTIPLAYER &bull; STACK COLLAPSES = WINNER TAKES ALL &bull; 1.5% HOUSE</p>
+<div class="conn-status wait" id="conn">Connecting...</div>
+<div class="room-link" id="roomlink" onclick="copyLink()">Loading room...</div>
+<div class="wrap">
+  <div class="panel">
+    <h3>GAME ROOM <span id="pcount" style="float:right;color:#556;font-weight:400">0/6</span></h3>
+    <div class="pot"><div class="l">POT</div><div class="v" id="pot">0p</div></div>
+    <div class="bal"><div class="l">YOUR BALANCE</div><div class="v" id="bal">100p</div></div>
+    <div class="sr"><span class="l">Your P/L</span><span class="v" id="pnl">0p</span></div>
+    <div id="plist"></div>
+    <div class="ht">House: <span id="ht">0.0</span>p</div>
+  </div>
+  <div style="position:relative">
+    <div class="cc">
+      <canvas id="gc" width="420" height="680"></canvas>
+      <div class="pop" id="pop"></div>
+    </div>
+    <div class="ctrls">
+      <button class="bd" id="dbtn">DROP 1p (Space)</button>
+    </div>
+    <div class="dh">Space / Click to drop your 1p into the pot</div>
+  </div>
+  <div class="panel">
+    <h3>LIVE FEED</h3>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+<script>
+(function(){
+// ===== CANVAS SETUP =====
+var gc = document.getElementById('gc');
+var ctx = gc.getContext('2d');
+var W = gc.width, H = gc.height;
+var GY = H - 44;
+var CX = W / 2;
+var GRAV = 0.45;
+var CW = 64;
+var CHH = 15;
+var time = 0;
+
+// ===== MULTIPLAYER STATE =====
+var ws = null;
+var myIdx = -1;
+var myName = '';
+var roomId = '';
+var players = [];  // synced from server: [{name, col, bal, drops, isYou}]
+var connected = false;
+
+// ===== VISUAL STATE (client only) =====
+var stack = [];
+var fallers = [];
+var inflight = null;
+var dropQueue = [];   // visual drop queue [{pidx, ox}]
+var sparks = [];
+var shake = 0;
+var house = 0;
+var collapsed = false;
+var visualBusy = false;
+
+// ===== CHIP =====
+function makeChip(cx, cy, pidx) {
+  return {x:cx, y:cy, vx:0, vy:0, ang:0, va:0, pidx:pidx, w:CW, h:CHH, op:1, sq:1, sqv:0, glow:0};
+}
+
+// ===== PARTICLES =====
+function makeSpark(px,py,vx,vy,col,life,sz,tp) {
+  return {x:px,y:py,vx:vx,vy:vy,col:col,life:life,ml:life,sz:sz,tp:tp};
+}
+function updateSpark(s) { s.vy+=0.1; s.x+=s.vx; s.y+=s.vy; s.vx*=0.99; s.life--; }
+function drawSpark(s) {
+  var a = Math.max(0, s.life/s.ml);
+  ctx.save(); ctx.globalAlpha = a;
+  if (s.tp==='s') {
+    ctx.strokeStyle=s.col; ctx.lineWidth=s.sz;
+    ctx.beginPath(); ctx.moveTo(s.x,s.y); ctx.lineTo(s.x-s.vx*4,s.y-s.vy*4); ctx.stroke();
+  } else if (s.tp==='g') {
+    var g=ctx.createRadialGradient(s.x,s.y,0,s.x,s.y,s.sz*1.5);
+    g.addColorStop(0,s.col); g.addColorStop(1,'transparent');
+    ctx.fillStyle=g; ctx.fillRect(s.x-s.sz*2,s.y-s.sz*2,s.sz*4,s.sz*4);
+  }
+  ctx.restore();
+}
+function boom(px,py,col,n) {
+  for(var i=0;i<n;i++){var a=Math.random()*Math.PI*2,sp=2+Math.random()*4;
+    sparks.push(makeSpark(px,py,Math.cos(a)*sp,Math.sin(a)*sp-2,col,30+Math.random()*25,2+Math.random()*1.5,'s'));}
+  for(var i=0;i<n/2;i++){sparks.push(makeSpark(px+(Math.random()-.5)*30,py,(Math.random()-.5)*.5,-.5-Math.random()*.5,'rgba(255,255,255,0.15)',35+Math.random()*20,5+Math.random()*6,'g'));}
+}
+function megaBoom(px,py) {
+  var cs=['#f0c040','#ffd700','#fff','#e74c3c','#2ecc71','#3498db','#ff6b6b'];
+  for(var i=0;i<100;i++){var a=Math.random()*Math.PI*2,sp=3+Math.random()*8;
+    sparks.push(makeSpark(px,py,Math.cos(a)*sp,Math.sin(a)*sp-4,cs[i%cs.length],50+Math.random()*50,2.5+Math.random()*2,'s'));}
+  for(var i=0;i<40;i++){sparks.push(makeSpark(px+(Math.random()-.5)*120,py+(Math.random()-.5)*80,(Math.random()-.5)*.5,-1-Math.random(),'rgba(240,192,64,0.3)',60+Math.random()*40,10+Math.random()*14,'g'));}
+}
+
+// ===== STACK =====
+function stackTopY() {
+  if (stack.length===0) return GY;
+  return GY - stack.length * CHH;
+}
+
+// ===== VISUAL DROP QUEUE =====
+function processDropQueue() {
+  if (visualBusy || collapsed) return;
+  if (dropQueue.length === 0) return;
+  var d = dropQueue.shift();
+  launchChipVisual(d.pidx, d.ox);
+}
+
+function launchChipVisual(pidx, ox) {
+  if (pidx >= players.length) return;
+  visualBusy = true;
+  var chip = makeChip(CX + ox, -30, pidx);
+  chip.vy = 5;
+  chip.vx = (Math.random()-0.5) * 0.6;
+  inflight = chip;
+}
+
+function chipLandsVisual() {
+  var chip = inflight;
+  inflight = null;
+  chip.y = stackTopY() - CHH;
+  chip.vy = 0; chip.vx = 0;
+  chip.sq = 0.5; chip.sqv = 0.12;
+  chip.glow = 1;
+  stack.push(chip);
+
+  var col = pidxCol(chip.pidx);
+  boom(chip.x, chip.y + chip.h, col, 10);
+  var force = 1.5 + Math.random() * 0.5;
+  for (var i = 0; i < stack.length - 1; i++) {
+    stack[i].vx += (Math.random()-0.5) * force;
+    stack[i].va += (Math.random()-0.5) * 0.015;
+    stack[i].sq = 0.87 + Math.random()*0.1;
+    stack[i].sqv = 0.025;
+  }
+  shake = 6;
+  visualBusy = false;
+}
+
+function doCollapseVisual(winnerIdx, winnerName, total, net) {
+  collapsed = true;
+
+  // fling all chips
+  for (var i = 0; i < stack.length; i++) {
+    var ch = stack[i];
+    var side = (Math.random()-0.5) * 2;
+    ch.vx = side * 4 + (Math.random()-0.5) * 7;
+    ch.vy = -(4 + Math.random() * 7);
+    ch.va = (Math.random()-0.5) * 0.3;
+    ch.glow = 1;
+    fallers.push(ch);
+  }
+  stack = [];
+  dropQueue = [];
+  visualBusy = false;
+  inflight = null;
+  shake = 20;
+
+  megaBoom(CX, GY - total * CHH / 2);
+
+  var isMe = winnerIdx === myIdx;
+  if (isMe) {
+    showPop('YOU WIN ' + net.toFixed(1) + 'p!', '#f0c040');
+    addLog('COLLAPSE! You win ' + net.toFixed(1) + 'p from ' + total + ' chips!', 'j');
+  } else {
+    showPop(winnerName + ' WINS ' + net.toFixed(1) + 'p!', '#e67e22');
+    addLog('COLLAPSE! ' + winnerName + ' takes ' + net.toFixed(1) + 'p (' + total + ' chips)', 'b');
+  }
+}
+
+function pidxCol(pidx) {
+  if (pidx < players.length) return players[pidx].col;
+  return '#888';
+}
+
+function showPop(txt, col) {
+  var p = document.getElementById('pop');
+  p.textContent = txt; p.style.color = col;
+  p.className = 'pop';
+  void p.offsetWidth;
+  p.className = 'pop show';
+  setTimeout(function(){ p.className = 'pop'; }, 2200);
+}
+
+// ===== MY DROP =====
+function myDrop() {
+  if (!connected) return;
+  if (collapsed) return;
+  if (myIdx === -1) return;
+  if (players[myIdx] && players[myIdx].bal < 1) { addLog("You're broke!", 's'); return; }
+  ws.send(JSON.stringify({type:'drop'}));
+}
+
+// ===== WEBSOCKET =====
+function connect() {
+  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  var params = new URLSearchParams(location.search);
+  var room = params.get('room') || '';
+  var url = proto + '//' + location.host + '/?room=' + room;
+
+  ws = new WebSocket(url);
+
+  ws.onopen = function() {
+    connected = true;
+    setConn('ok', 'Connected');
+  };
+
+  ws.onclose = function() {
+    connected = false;
+    setConn('bad', 'Disconnected - refresh to rejoin');
+  };
+
+  ws.onerror = function() {
+    setConn('bad', 'Connection error');
+  };
+
+  ws.onmessage = function(e) {
+    var msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    handleMsg(msg);
+  };
+}
+
+function handleMsg(msg) {
+  switch(msg.type) {
+
+    case 'welcome':
+      roomId = msg.roomId;
+      myIdx = msg.yourIdx;
+      myName = msg.yourName;
+      // Update URL without reload
+      if (history.replaceState) {
+        history.replaceState(null, '', '?room=' + roomId);
+      }
+      document.getElementById('roomlink').innerHTML =
+        'Room: <b>' + roomId + '</b> — click to copy invite link';
+      addLog('You joined as ' + myName, 's');
+      break;
+
+    case 'state':
+      players = msg.players;
+      house = msg.house;
+      // Find my new index
+      for (var i = 0; i < players.length; i++) {
+        if (players[i].isYou) { myIdx = i; break; }
+      }
+      // Sync stack visuals to server count
+      syncStackToCount(msg.stackCount, msg.stack);
+      if (msg.collapsed) {
+        collapsed = true;
+      } else {
+        collapsed = false;
+      }
+      updUI();
+      break;
+
+    case 'drop':
+      // Another player (or us) dropped a chip
+      var name = msg.name;
+      var isMe = msg.pidx === myIdx;
+      addLog(name + ' dropped 1p', 'd');
+      dropQueue.push({pidx: msg.pidx, ox: msg.ox});
+      // Update local player state
+      if (msg.pidx < players.length) {
+        players[msg.pidx].drops++;
+        if (msg.pidx === myIdx) players[msg.pidx].bal = msg.bal;
+      }
+      updUI();
+      break;
+
+    case 'landed':
+      // Stack held
+      break;
+
+    case 'collapse':
+      house = msg.house;
+      // Update winner balance locally
+      if (msg.winnerIdx < players.length) {
+        if (msg.winnerIdx === myIdx) {
+          players[msg.winnerIdx].bal += msg.net;
+        }
+      }
+      // Wait for visual queue to finish then collapse
+      var checkVisual = setInterval(function() {
+        if (!visualBusy && !inflight) {
+          clearInterval(checkVisual);
+          doCollapseVisual(msg.winnerIdx, msg.winnerName, msg.total, msg.net);
+          updUI();
+        }
+      }, 50);
+      break;
+
+    case 'newRound':
+      setTimeout(function() {
+        collapsed = false;
+        addLog('--- Round ' + msg.roundNum + ' ---', 's');
+        updUI();
+      }, 2000);
+      break;
+
+    case 'playerJoined':
+      addLog(msg.name + ' joined (' + msg.playerCount + '/6)', 's');
+      break;
+
+    case 'playerLeft':
+      addLog(msg.name + ' left (' + msg.playerCount + '/6)', 's');
+      break;
+
+    case 'error':
+      addLog('Error: ' + msg.msg, 'b');
+      setConn('bad', msg.msg);
+      break;
+  }
+}
+
+function syncStackToCount(count, serverStack) {
+  // If our visual stack is behind, add placeholder chips
+  while (stack.length < count) {
+    var idx = stack.length;
+    var pidx = (serverStack && serverStack[idx]) ? serverStack[idx].pidx : 0;
+    var chip = makeChip(CX, GY - (idx+1) * CHH, pidx);
+    chip.sq = 1; chip.glow = 0;
+    stack.push(chip);
+  }
+  // If ahead (after collapse sync), trim
+  if (count === 0 && !collapsed) {
+    stack = [];
+    dropQueue = [];
+    inflight = null;
+    visualBusy = false;
+  }
+}
+
+function setConn(cls, txt) {
+  var el = document.getElementById('conn');
+  el.className = 'conn-status ' + cls;
+  el.textContent = txt;
+}
+
+function copyLink() {
+  var url = location.origin + '/?room=' + roomId;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(url).then(function() {
+      var el = document.getElementById('roomlink');
+      el.innerHTML = 'Room: <b>' + roomId + '</b> — <span class="copied">Link copied!</span>';
+      setTimeout(function() {
+        el.innerHTML = 'Room: <b>' + roomId + '</b> — click to copy invite link';
+      }, 2000);
+    });
+  }
+}
+
+// ===== PHYSICS (visual only) =====
+function physics() {
+  time++;
+  processDropQueue();
+
+  if (inflight) {
+    inflight.vy += GRAV;
+    inflight.x += inflight.vx;
+    inflight.y += inflight.vy;
+    var landY = stackTopY() - CHH;
+    if (inflight.y >= landY) {
+      inflight.y = landY;
+      chipLandsVisual();
+    }
+  }
+
+  for (var i = 0; i < stack.length; i++) {
+    var s = stack[i];
+    s.sqv += (1-s.sq)*0.15; s.sqv *= 0.65; s.sq += s.sqv;
+    s.glow *= 0.92;
+    s.vx *= 0.84; s.x += s.vx;
+    s.ang += s.va; s.va *= 0.86; s.ang *= 0.9;
+    var dr = s.x - CX; if (Math.abs(dr) > 18) s.vx -= dr * 0.02;
+    var ty = GY - (i+1) * CHH;
+    s.y += (ty - s.y) * 0.3;
+  }
+
+  for (var i = fallers.length-1; i >= 0; i--) {
+    var f = fallers[i];
+    f.vy += GRAV * 0.7;
+    f.x += f.vx; f.y += f.vy;
+    f.ang += f.va;
+    f.sqv += (1-f.sq)*0.1; f.sqv *= 0.6; f.sq += f.sqv;
+    if (f.x < 15) { f.x = 15; f.vx *= -0.5; }
+    if (f.x > W-15) { f.x = W-15; f.vx *= -0.5; }
+    if (f.y > GY - f.h/2) {
+      f.y = GY - f.h/2;
+      f.vy *= -0.35; f.vx *= 0.7; f.va *= 0.5;
+      f.sq = 0.6; f.sqv = 0.07;
+      if (Math.abs(f.vy) < 1) {
+        f.vy = 0; f.vx *= 0.95;
+        if (Math.abs(f.vx) < 0.2) f.vx = (f.x < CX ? -1 : 1) * (0.5 + Math.random());
+      }
+    }
+    if (f.x < -50 || f.x > W+50 || f.y > H+40) f.op -= 0.06;
+    if (f.op <= 0) fallers.splice(i, 1);
+  }
+
+  for (var i = sparks.length-1; i >= 0; i--) {
+    updateSpark(sparks[i]);
+    if (sparks[i].life <= 0) sparks.splice(i, 1);
+  }
+
+  if (shake > 0) { shake *= 0.8; if (shake < 0.15) shake = 0; }
+}
+
+// ===== DRAW CHIP =====
+function drawChip(chip, ox, oy, ang, opacity) {
+  var hw = chip.w/2, hh = chip.h/2;
+  var col = pidxCol(chip.pidx);
+  var sq = chip.sq || 1;
+
+  ctx.save();
+  ctx.globalAlpha = opacity !== undefined ? opacity : 1;
+  ctx.translate(ox, oy + hh);
+  if (ang) ctx.rotate(ang);
+  ctx.scale(1 + (1-sq)*0.5, sq);
+
+  var dp = Math.max(4, chip.h * 0.4);
+  var c1 = col, c2 = lighten(col, 35), c3 = darken(col, 45);
+
+  if (chip.glow > 0.05) {
+    ctx.fillStyle = col + '44';
+    ctx.beginPath(); ctx.ellipse(0, hh, hw*1.3, dp*2, 0, 0, Math.PI*2); ctx.fill();
+  }
+
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath(); ctx.ellipse(3, hh+4, hw*0.85, dp*0.4, 0, 0, Math.PI*2); ctx.fill();
+
+  for (var dy = dp; dy >= 0; dy -= 2) {
+    var t = dy / dp;
+    ctx.fillStyle = lerpC(c3, c1, t);
+    ctx.beginPath(); ctx.ellipse(0, hh - dy*0.6, hw, hh*0.6, 0, 0, Math.PI*2); ctx.fill();
+  }
+
+  var tg = ctx.createRadialGradient(-hw*0.3, -hh*0.3, 0, 0, 0, hw);
+  tg.addColorStop(0, lighten(c2, 30)); tg.addColorStop(0.5, c1); tg.addColorStop(1, darken(c1, 20));
+  ctx.fillStyle = tg;
+  ctx.beginPath(); ctx.ellipse(0, -hh*0.15, hw, hh*0.75, 0, 0, Math.PI*2); ctx.fill();
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.ellipse(0, -hh*0.15, hw*0.6, hh*0.45, 0, 0, Math.PI*2); ctx.stroke();
+
+  var sg = ctx.createRadialGradient(-hw*0.25, -hh*0.5, 0, -hw*0.15, -hh*0.3, hw*0.5);
+  sg.addColorStop(0, 'rgba(255,255,255,0.3)'); sg.addColorStop(0.6, 'rgba(255,255,255,0.05)'); sg.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = sg;
+  ctx.beginPath(); ctx.ellipse(0, -hh*0.15, hw, hh*0.75, 0, 0, Math.PI*2); ctx.fill();
+
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 3;
+  ctx.fillText('1p', 0, -hh*0.15);
+  ctx.shadowBlur = 0;
+
+  ctx.restore();
+}
+
+// ===== SCENE =====
+function drawScene() {
+  var bg = ctx.createLinearGradient(0,0,0,H);
+  bg.addColorStop(0,'#080818'); bg.addColorStop(0.5,'#0c0c24'); bg.addColorStop(1,'#0a0a1e');
+  ctx.fillStyle = bg; ctx.fillRect(0,0,W,H);
+
+  var vg = ctx.createRadialGradient(CX,H/2,H*0.2,CX,H/2,H*0.7);
+  vg.addColorStop(0,'transparent'); vg.addColorStop(1,'rgba(0,0,0,0.4)');
+  ctx.fillStyle = vg; ctx.fillRect(0,0,W,H);
+
+  var pw = 140, pl = CX-pw/2, pr = CX+pw/2;
+  var pg = ctx.createLinearGradient(pl,GY,pl,GY+20);
+  pg.addColorStop(0,'#3a6a9c'); pg.addColorStop(0.3,'#2a5080'); pg.addColorStop(1,'#1a3050');
+  ctx.fillStyle = pg;
+  ctx.beginPath(); ctx.moveTo(pl-6,GY); ctx.lineTo(pr+6,GY); ctx.lineTo(pr,GY+14); ctx.lineTo(pl,GY+14); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(pl-4,GY,pw+8,2);
+  ctx.fillStyle = '#12284a'; ctx.fillRect(pl+6,GY+12,8,22); ctx.fillRect(pr-14,GY+12,8,22);
+
+  var gw = ctx.createRadialGradient(CX,GY,0,CX,GY,pw*0.8);
+  gw.addColorStop(0,'rgba(60,120,180,0.1)'); gw.addColorStop(1,'transparent');
+  ctx.fillStyle = gw; ctx.fillRect(pl-60,GY-30,pw+120,60);
+}
+
+function drawPotLabel() {
+  if (stack.length > 0) {
+    var topY = GY - stack.length * CHH;
+    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText(stack.length + 'p', CX + CW/2 + 12, topY + CHH/2 + 4);
+  }
+}
+
+function render() {
+  ctx.save();
+  if (shake > 0) ctx.translate((Math.random()-0.5)*shake*2, (Math.random()-0.5)*shake*2);
+  drawScene();
+  for (var i = 0; i < sparks.length; i++) if (sparks[i].tp === 'g') drawSpark(sparks[i]);
+  for (var i = 0; i < fallers.length; i++) drawChip(fallers[i], fallers[i].x, fallers[i].y, fallers[i].ang, fallers[i].op);
+  for (var i = 0; i < stack.length; i++) drawChip(stack[i], stack[i].x, stack[i].y, stack[i].ang);
+  if (inflight) drawChip(inflight, inflight.x, inflight.y, 0);
+  for (var i = 0; i < sparks.length; i++) if (sparks[i].tp !== 'g') drawSpark(sparks[i]);
+  drawPotLabel();
+  ctx.restore();
+}
+
+// ===== HELPERS =====
+function parseC(s) {
+  if (s[0]==='#') return [parseInt(s.slice(1,3),16), parseInt(s.slice(3,5),16), parseInt(s.slice(5,7),16)];
+  var m = s.match(/(\d+)/g); return m ? [+m[0],+m[1],+m[2]] : [128,128,128];
+}
+function lighten(col, a) {
+  var c = parseC(col); return 'rgb('+Math.min(255,c[0]+a)+','+Math.min(255,c[1]+a)+','+Math.min(255,c[2]+a)+')';
+}
+function darken(col, a) {
+  var c = parseC(col); return 'rgb('+Math.max(0,c[0]-a)+','+Math.max(0,c[1]-a)+','+Math.max(0,c[2]-a)+')';
+}
+function lerpC(h1, h2, t) {
+  var a = parseC(h1), b = parseC(h2);
+  return 'rgb('+Math.round(a[0]+(b[0]-a[0])*t)+','+Math.round(a[1]+(b[1]-a[1])*t)+','+Math.round(a[2]+(b[2]-a[2])*t)+')';
+}
+
+// ===== LOOP =====
+function loop() { physics(); render(); requestAnimationFrame(loop); }
+
+// ===== UI =====
+function updUI() {
+  document.getElementById('pot').textContent = stack.length + 'p';
+
+  var myPlayer = (myIdx >= 0 && myIdx < players.length) ? players[myIdx] : null;
+  var bal = myPlayer ? myPlayer.bal : 100;
+  document.getElementById('bal').textContent = Math.round(bal) + 'p';
+  var pnl = bal - 100;
+  var pe = document.getElementById('pnl');
+  pe.textContent = (pnl >= 0 ? '+' : '') + Math.round(pnl) + 'p';
+  pe.style.color = pnl >= 0 ? '#2ecc71' : '#e74c3c';
+  document.getElementById('ht').textContent = house.toFixed(1);
+  document.getElementById('pcount').textContent = players.length + '/6';
+
+  // Player list
+  var h = '';
+  for (var i = 0; i < players.length; i++) {
+    var p = players[i];
+    h += '<div class="pcard"><div class="dot" style="background:'+p.col+'"></div>';
+    h += '<span class="nm'+(p.isYou?' me':'')+'">'+p.name+(p.isYou?' (you)':'')+'</span>';
+    h += '<span style="color:#556;font-size:.85em">'+p.drops+'</span></div>';
+  }
+  for (var i = players.length; i < 6; i++) {
+    h += '<div class="empty-slot">waiting for player...</div>';
+  }
+  document.getElementById('plist').innerHTML = h;
+
+  var btn = document.getElementById('dbtn');
+  btn.disabled = !connected || collapsed || !myPlayer || myPlayer.bal < 1;
+  if (!connected) btn.textContent = 'CONNECTING...';
+  else if (!myPlayer) btn.textContent = 'JOINING...';
+  else if (myPlayer.bal < 1) btn.textContent = 'BROKE';
+  else btn.textContent = 'DROP 1p (Space)';
+}
+
+function addLog(msg, cls) {
+  var el = document.getElementById('log');
+  var d = document.createElement('div');
+  d.className = cls;
+  var t = new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  d.textContent = '['+t+'] '+msg;
+  el.prepend(d);
+  while (el.children.length > 80) el.removeChild(el.lastChild);
+}
+
+// ===== EVENTS =====
+document.getElementById('dbtn').addEventListener('click', function(){ myDrop(); });
+gc.addEventListener('click', function(){ myDrop(); });
+gc.addEventListener('touchstart', function(e){ e.preventDefault(); myDrop(); });
+document.addEventListener('keydown', function(e){
+  if (e.code === 'Space') { e.preventDefault(); myDrop(); }
+});
+
+// ===== START =====
+updUI();
+loop();
+connect();
+})();
+</script>
+</body>
+</html>
