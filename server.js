@@ -104,11 +104,14 @@ function handleDrop(room, playerIdx) {
   });
 
   if (willCollapse) {
-    doCollapse(room, playerIdx);
+    // Pick a random collapse event — server decides so all clients see same one
+    const EVENTS = ['bomb','lightning','tsunami','cat','meteor','ufo'];
+    const event = EVENTS[Math.floor(Math.random() * EVENTS.length)];
+    doCollapse(room, playerIdx, event);
   }
 }
 
-function doCollapse(room, winnerIdx) {
+function doCollapse(room, winnerIdx, event) {
   room.collapsed = true;
   const total = room.stack.length;
   const cut = Math.round(total * HCUT * 100) / 100;
@@ -128,7 +131,7 @@ function doCollapse(room, winnerIdx) {
     net,
     cut,
     house: room.house,
-    // Send updated balances for all players
+    event: event,
     balances: room.players.map(p => p.bal),
   });
 
