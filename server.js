@@ -19,7 +19,15 @@ const NAMES = [
   'DiceDemon','JackpotJoe','WildCard','AcesHigh','PokerFace'
 ];
 
-const COLORS = ['#f0c040','#3498db','#2ecc71','#9b59b6','#e67e22','#1abc9c'];
+const COLORS = ['#f0c040','#3498db','#2ecc71','#9b59b6','#e67e22','#1abc9c','#ff6b6b','#00bcd4','#ff9800','#8bc34a'];
+
+function pickColor(room) {
+  const taken = new Set(room.players.map(p => p.col));
+  for (const col of COLORS) {
+    if (!taken.has(col)) return col;
+  }
+  return '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6,'0');
+}
 
 const rooms = new Map();
 
@@ -207,7 +215,7 @@ wss.on('connection', (ws, req) => {
   const player = {
     id: crypto.randomBytes(4).toString('hex'),
     name: pickName(room),
-    col: COLORS[playerIdx % COLORS.length],
+    col: pickColor(room),
     ws,
     bal: 100,
     drops: 0,
