@@ -47,7 +47,7 @@ body{background:var(--bg-primary);color:var(--text-1);font-family:var(--font);di
 .room-pill:hover{background:rgba(59,130,246,.18)}
 .room-pill svg{width:12px;height:12px;fill:currentColor}
 .room-pill.copied{color:var(--green);border-color:rgba(0,210,106,.3);background:var(--green-dim)}
-.game-wrap{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;justify-content:center;padding:0 8px;max-width:860px;width:100%}
+.game-wrap{display:flex;gap:12px;align-items:flex-start;justify-content:center;padding:0 8px;max-width:900px;width:100%}
 .panel{background:var(--bg-card);border-radius:12px;padding:14px;width:220px;border:1px solid var(--border);position:relative;overflow:hidden}
 .panel::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--border-glow),transparent)}
 .panel-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border)}
@@ -94,9 +94,11 @@ canvas{display:block}
 .feed .w{color:var(--green);font-weight:600}.feed .j{color:var(--gold);font-weight:600}
 .feed .d{color:var(--text-3)}.feed .b{color:#ff8c42;font-weight:600}.feed .s{color:var(--gold);font-weight:500}
 .feed .ev{color:var(--red);font-weight:700}
-@media(max-width:700px){
-  .game-wrap{flex-direction:column;align-items:center}
+.panel-feed{position:sticky;top:12px;align-self:flex-start}
+@media(max-width:780px){
+  .game-wrap{flex-wrap:wrap}
   .panel{width:100%;max-width:420px}
+  .panel-feed{position:static}
   .game-area{order:-1}
 }
 </style>
@@ -131,7 +133,7 @@ canvas{display:block}
     <div class="ctrls"><button class="drop-btn" id="dbtn">DROP 1p</button></div>
     <div class="drop-hint"><span class="key-hint">Space</span> or <span class="key-hint">Click</span> to drop</div>
   </div>
-  <div class="panel">
+  <div class="panel panel-feed">
     <div class="panel-title"><h3>Live Feed</h3><span class="badge" style="color:var(--green)">LIVE</span></div>
     <div class="feed" id="log"></div>
   </div>
