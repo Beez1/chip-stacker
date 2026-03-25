@@ -105,6 +105,7 @@ var shake = 0;
 var house = 0;
 var collapsed = false;
 var visualBusy = false;
+var pendingMyDrops = 0;  // optimistic drops awaiting server echo
 
 // ===== CHIP =====
 function makeChip(cx, cy, pidx) {
@@ -237,7 +238,17 @@ function myDrop() {
   if (collapsed) return;
   if (myIdx === -1) return;
   if (players[myIdx] && players[myIdx].bal < 1) { addLog("You're broke!", 's'); return; }
+
+  // Optimistic: animate immediately, don't wait for server
+  var ox = (Math.random()-0.5) * 22;
+  dropQueue.push({pidx: myIdx, ox: ox});
+  players[myIdx].bal -= 1;
+  players[myIdx].drops++;
+  addLog(players[myIdx].name + ' dropped 1p', 'd');
+  updUI();
+
   ws.send(JSON.stringify({type:'drop'}));
+  pendingMyDrops++;
 }
 
 // ===== WEBSOCKET =====
@@ -304,15 +315,18 @@ function handleMsg(msg) {
       break;
 
     case 'drop':
-      // Another player (or us) dropped a chip
-      var name = msg.name;
-      var isMe = msg.pidx === myIdx;
-      addLog(name + ' dropped 1p', 'd');
+      if (msg.pidx === myIdx && pendingMyDrops > 0) {
+        // We already animated this optimistically — just sync balance
+        pendingMyDrops--;
+        if (msg.pidx < players.length) players[msg.pidx].bal = msg.bal;
+        updUI();
+        break;
+      }
+      // Other player dropped
+      addLog(msg.name + ' dropped 1p', 'd');
       dropQueue.push({pidx: msg.pidx, ox: msg.ox});
-      // Update local player state
       if (msg.pidx < players.length) {
         players[msg.pidx].drops++;
-        if (msg.pidx === myIdx) players[msg.pidx].bal = msg.bal;
       }
       updUI();
       break;
