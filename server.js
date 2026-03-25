@@ -74,7 +74,7 @@ function fullState(room, forIdx) {
 }
 
 // ===== GAME LOGIC =====
-function handleDrop(room, playerIdx) {
+function handleDrop(room, playerIdx, clientOx) {
   const player = room.players[playerIdx];
   if (!player || room.collapsed || player.bal < 1) return;
 
@@ -82,8 +82,8 @@ function handleDrop(room, playerIdx) {
   player.bal -= 1;
   player.drops++;
 
-  // Server generates the offset — everyone uses the same value
-  const ox = (Math.random() - 0.5) * 22;
+  // Use the ox from the dropping client so their optimistic animation matches
+  const ox = (typeof clientOx === 'number') ? Math.max(-11, Math.min(11, clientOx)) : (Math.random() - 0.5) * 22;
   room.stack.push({ pidx: playerIdx });
 
   const len = room.stack.length;
@@ -243,7 +243,7 @@ wss.on('connection', (ws, req) => {
     try { msg = JSON.parse(raw); } catch { return; }
     const idx = room.players.findIndex(p => p.ws === ws);
     if (idx === -1) return;
-    if (msg.type === 'drop') handleDrop(room, idx);
+    if (msg.type === 'drop') handleDrop(room, idx, msg.ox);
   });
 
   ws.on('close', () => {

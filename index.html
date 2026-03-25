@@ -396,7 +396,7 @@ function myDrop() {
   launchChip(myIdx, ox);
   players[myIdx].bal-=1; players[myIdx].drops++;
   addLog(players[myIdx].name+' dropped 1p','d'); updUI();
-  ws.send(JSON.stringify({type:'drop'})); pendingMyDrops++;
+  ws.send(JSON.stringify({type:'drop', ox:ox})); pendingMyDrops++;
 }
 
 // ===== WEBSOCKET =====
