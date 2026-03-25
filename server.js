@@ -157,7 +157,7 @@ function doCollapse(room, winnerIdx, event) {
       sendTo(room.players[i].ws, fullState(room, i));
     }
     broadcast(room, { type: 'newRound', roundNum: room.roundNum });
-  }, 2800);
+  }, 5500);
 }
 
 function removePlayer(room, playerIdx) {

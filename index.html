@@ -148,7 +148,7 @@ function boom(px,py,col,n){
 // ===== CANVAS EVENT EFFECTS =====
 function startEventFx(type,total){
   var mid=GY-total*CHH/2;
-  eventFx={type:type,t:0,dur:90,mid:mid,total:total,data:{}};
+  eventFx={type:type,t:0,dur:210,mid:mid,total:total,data:{}};
   // Pre-generate data for deterministic drawing
   if(type==='lightning'){
     // Generate bolt path
@@ -165,8 +165,8 @@ function startEventFx(type,total){
     }
   }
   if(type==='meteor'){eventFx.data.sx=W*.8;eventFx.data.sy=-30;eventFx.data.ex=CX;eventFx.data.ey=mid;}
-  if(type==='tsunami'){eventFx.dur=100;}
-  if(type==='ufo'){eventFx.dur=110;}
+  if(type==='tsunami'){eventFx.dur=240;}
+  if(type==='ufo'){eventFx.dur=260;}
 
   // Event-specific sparks
   spawnEventSparks(type,total,mid);
@@ -386,8 +386,8 @@ function playEventLabel(type){
   var el=document.getElementById('evlabel');
   el.textContent=meta.label;el.style.color=meta.color;
   gsap.killTweensOf(el);
-  gsap.fromTo(el,{opacity:0,scale:.6,y:10},{opacity:1,scale:1,y:0,duration:.35,ease:'back.out(2)',
-    onComplete:function(){gsap.to(el,{opacity:0,y:-20,duration:.5,delay:1,ease:'power2.in'});}});
+  gsap.fromTo(el,{opacity:0,scale:.6,y:10},{opacity:1,scale:1,y:0,duration:.5,ease:'back.out(2)',
+    onComplete:function(){gsap.to(el,{opacity:0,y:-20,duration:.7,delay:2.2,ease:'power2.in'});}});
   gsap.to('#cwrap',{x:function(){return(Math.random()-.5)*10;},y:function(){return(Math.random()-.5)*6;},duration:.05,repeat:10,yoyo:true,ease:'none',onComplete:function(){gsap.set('#cwrap',{x:0,y:0});}});
   gsap.fromTo('#pot',{scale:1},{scale:1.15,duration:.12,yoyo:true,repeat:3,ease:'power2.inOut'});
 }
@@ -414,15 +414,15 @@ function doCollapseVisual(winnerIdx,winnerName,total,net,event){
       case'meteor':ch.vx=(Math.random()-.5)*10;ch.vy=2+Math.random()*5;break;
       default:ch.vx=(Math.random()-.5)*14;ch.vy=-(4+Math.random()*7);
     }
-    ch.va=(Math.random()-.5)*.3;ch.glow=1;ch.fadeTimer=40+Math.floor(Math.random()*30);fallers.push(ch);
+    ch.va=(Math.random()-.5)*.3;ch.glow=1;ch.fadeTimer=120+Math.floor(Math.random()*60);fallers.push(ch);
   }
   stack=[];inflights=[];shake=25;
   screenFlash=1;screenFlashCol=EVENT_META[event]?EVENT_META[event].color:'#fff';
   startEventFx(event,total);
   playEventLabel(event);
   if(EVENT_META[event])addLog(EVENT_META[event].logMsg,'ev');
-  if(winnerIdx===myIdx){setTimeout(function(){showPop('YOU WIN '+net.toFixed(1)+'p!','#e2b93b');},600);addLog('COLLAPSE! You win '+net.toFixed(1)+'p from '+total+' chips!','j');}
-  else{setTimeout(function(){showPop(winnerName+' WINS '+net.toFixed(1)+'p!','#ff8c42');},600);addLog('COLLAPSE! '+winnerName+' takes '+net.toFixed(1)+'p ('+total+' chips)','b');}
+  if(winnerIdx===myIdx){setTimeout(function(){showPop('YOU WIN '+net.toFixed(1)+'p!','#e2b93b');},1800);addLog('COLLAPSE! You win '+net.toFixed(1)+'p from '+total+' chips!','j');}
+  else{setTimeout(function(){showPop(winnerName+' WINS '+net.toFixed(1)+'p!','#ff8c42');},1800);addLog('COLLAPSE! '+winnerName+' takes '+net.toFixed(1)+'p ('+total+' chips)','b');}
   updUI();
 }
 
@@ -452,7 +452,7 @@ function handleMsg(msg){
     case'state':players=msg.players;house=msg.house;for(var i=0;i<players.length;i++){if(players[i].isYou){myIdx=i;break;}}if(inflights.length===0&&!collapsed)syncStack(msg.stack);collapsed=msg.collapsed;pendingMyDrops=0;updUI();break;
     case'drop':if(msg.pidx===myIdx&&pendingMyDrops>0){pendingMyDrops--;if(msg.pidx<players.length)players[msg.pidx].bal=msg.bal;}else{addLog(msg.name+' dropped 1p','d');launchChip(msg.pidx,msg.ox);if(msg.pidx<players.length){players[msg.pidx].drops++;players[msg.pidx].bal=msg.bal;}}updUI();break;
     case'collapse':house=msg.house;if(msg.balances){for(var i=0;i<msg.balances.length&&i<players.length;i++)players[i].bal=msg.balances[i];}pendingMyDrops=0;var ev={winnerIdx:msg.winnerIdx,winnerName:msg.winnerName,total:msg.total,net:msg.net,event:msg.event||'bomb'};if(inflights.length>0)pendingCollapse=ev;else doCollapseVisual(ev.winnerIdx,ev.winnerName,ev.total,ev.net,ev.event);updUI();break;
-    case'newRound':setTimeout(function(){collapsed=false;addLog('--- Round '+msg.roundNum+' ---','s');updUI();},2000);break;
+    case'newRound':setTimeout(function(){collapsed=false;addLog('--- Round '+msg.roundNum+' ---','s');updUI();},3500);break;
     case'playerJoined':addLog(msg.name+' joined ('+msg.playerCount+'/6)','s');break;
     case'playerLeft':addLog(msg.name+' left ('+msg.playerCount+'/6)','s');break;
     case'error':addLog('Error: '+msg.msg,'b');setConn('bad',msg.msg);break;
@@ -466,11 +466,11 @@ function copyLink(){var url=location.origin+'/?room='+roomId;if(navigator.clipbo
 function physics(){
   for(var i=inflights.length-1;i>=0;i--){var ch=inflights[i];ch.vy+=GRAV;ch.x+=ch.vx;ch.y+=ch.vy;if(ch.y>=GY-(stack.length+1)*CHH){ch.y=GY-(stack.length+1)*CHH;chipLands(ch,i);}}
   for(var i=0;i<stack.length;i++){var s=stack[i];s.sqv+=(1-s.sq)*.15;s.sqv*=.65;s.sq+=s.sqv;s.glow*=.92;s.vx*=.84;s.x+=s.vx;s.ang+=s.va;s.va*=.86;s.ang*=.9;var dr=s.x-CX;if(Math.abs(dr)>18)s.vx-=dr*.02;s.y+=(GY-(i+1)*CHH-s.y)*.3;}
-  for(var i=fallers.length-1;i>=0;i--){var f=fallers[i];f.vy+=GRAV*.7;f.x+=f.vx;f.y+=f.vy;f.ang+=f.va;f.sqv+=(1-f.sq)*.1;f.sqv*=.6;f.sq+=f.sqv;if(f.x<15){f.x=15;f.vx*=-.5;}if(f.x>W-15){f.x=W-15;f.vx*=-.5;}if(f.y>GY-f.h/2){f.y=GY-f.h/2;f.vy*=-.3;f.vx*=.6;f.va*=.4;f.sq=.6;f.sqv=.05;if(Math.abs(f.vy)<.8)f.vy=0;}if(f.fadeTimer!==undefined){f.fadeTimer--;if(f.fadeTimer<=0)f.op-=.08;}if(f.x<-30||f.x>W+30||f.y<-50||f.y>H+30)f.op-=.12;if(f.op<=0)fallers.splice(i,1);}
+  for(var i=fallers.length-1;i>=0;i--){var f=fallers[i];f.vy+=GRAV*.7;f.x+=f.vx;f.y+=f.vy;f.ang+=f.va;f.sqv+=(1-f.sq)*.1;f.sqv*=.6;f.sq+=f.sqv;if(f.x<15){f.x=15;f.vx*=-.5;}if(f.x>W-15){f.x=W-15;f.vx*=-.5;}if(f.y>GY-f.h/2){f.y=GY-f.h/2;f.vy*=-.3;f.vx*=.6;f.va*=.4;f.sq=.6;f.sqv=.05;if(Math.abs(f.vy)<.8)f.vy=0;}if(f.fadeTimer!==undefined){f.fadeTimer--;if(f.fadeTimer<=0)f.op-=.03;}if(f.x<-30||f.x>W+30||f.y<-50||f.y>H+30)f.op-=.06;if(f.op<=0)fallers.splice(i,1);}
   for(var i=sparks.length-1;i>=0;i--){upS(sparks[i]);if(sparks[i].life<=0)sparks.splice(i,1);}
   if(sparks.length>300)sparks.splice(0,sparks.length-300);
   updateEventFx();
-  if(screenFlash>0){screenFlash*=.88;if(screenFlash<.01)screenFlash=0;}
+  if(screenFlash>0){screenFlash*=.95;if(screenFlash<.01)screenFlash=0;}
   if(shake>0){shake*=.8;if(shake<.15)shake=0;}
   // Ambient dots
   for(var i=0;i<ambientDots.length;i++){var d=ambientDots[i];d.x+=d.vx;d.y+=d.vy;if(d.y<-5){d.y=H+5;d.x=Math.random()*W;}if(d.x<-5||d.x>W+5)d.x=Math.random()*W;}
