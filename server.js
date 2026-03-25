@@ -21,11 +21,10 @@ const NAMES = [
 
 const COLORS = ['#f0c040','#3498db','#2ecc71','#9b59b6','#e67e22','#1abc9c'];
 
-// ===== ROOMS =====
 const rooms = new Map();
 
 function genRoomId() {
-  return crypto.randomBytes(3).toString('hex'); // 6 char hex
+  return crypto.randomBytes(3).toString('hex');
 }
 
 function pickName(room) {
@@ -38,21 +37,20 @@ function pickName(room) {
 function createRoom(id) {
   return {
     id,
-    players: [],       // [{id, name, col, ws, bal, drops}]
-    stack: [],         // [{pidx, id}] — server only tracks count + owner
-    busy: false,
-    collapsed: false,
+    players: [],
+    stack: [],        // [{pidx}]
+    seq: 0,           // global sequence counter
     house: 0,
     roundNum: 1,
+    collapsed: false,
+    collapseTimer: null,
   };
 }
 
-function broadcast(room, msg, excludeWs) {
+function broadcast(room, msg) {
   const data = JSON.stringify(msg);
   for (const p of room.players) {
-    if (p.ws !== excludeWs && p.ws.readyState === 1) {
-      p.ws.send(data);
-    }
+    if (p.ws.readyState === 1) p.ws.send(data);
   }
 }
 
@@ -60,73 +58,54 @@ function sendTo(ws, msg) {
   if (ws.readyState === 1) ws.send(JSON.stringify(msg));
 }
 
-function roomState(room, forPlayerIdx) {
+function fullState(room, forIdx) {
   return {
     type: 'state',
     roomId: room.id,
+    seq: room.seq,
     players: room.players.map((p, i) => ({
-      name: p.name,
-      col: p.col,
-      bal: p.bal,
-      drops: p.drops,
-      isYou: i === forPlayerIdx,
+      name: p.name, col: p.col, bal: p.bal, drops: p.drops, isYou: i === forIdx,
     })),
-    stackCount: room.stack.length,
     stack: room.stack.map(ch => ({ pidx: ch.pidx })),
     house: room.house,
     roundNum: room.roundNum,
     collapsed: room.collapsed,
-    busy: room.busy,
   };
 }
 
 // ===== GAME LOGIC =====
 function handleDrop(room, playerIdx) {
   const player = room.players[playerIdx];
-  if (!player) return;
-  if (room.collapsed) return;
-  if (room.busy) return;
-  if (player.bal < 1) return;
+  if (!player || room.collapsed || player.bal < 1) return;
 
-  room.busy = true;
+  room.seq++;
   player.bal -= 1;
   player.drops++;
 
-  // Random horizontal offset for the drop
+  // Server generates the offset — everyone uses the same value
   const ox = (Math.random() - 0.5) * 22;
+  room.stack.push({ pidx: playerIdx });
 
-  const chip = { pidx: playerIdx };
-  room.stack.push(chip);
+  const len = room.stack.length;
+  const collapseChance = len <= 4 ? 0 : 0.03 + (len - 4) * 0.025;
+  const willCollapse = Math.random() < collapseChance;
 
-  // Broadcast the drop to all players
+  // Send drop + collapse info in ONE message — no delay
   broadcast(room, {
     type: 'drop',
+    seq: room.seq,
     pidx: playerIdx,
     name: player.name,
+    col: player.col,
     ox: ox,
-    stackCount: room.stack.length,
+    stackCount: len,
     bal: player.bal,
+    collapse: willCollapse,
   });
 
-  // Check collapse after a short delay (simulating chip landing)
-  setTimeout(() => {
-    if (room.collapsed) return;
-
-    const len = room.stack.length;
-    const collapseChance = len <= 4 ? 0 : 0.03 + (len - 4) * 0.025;
-    const roll = Math.random();
-
-    if (roll < collapseChance) {
-      doCollapse(room, playerIdx);
-    } else {
-      room.busy = false;
-      broadcast(room, {
-        type: 'landed',
-        stackCount: room.stack.length,
-        collapsed: false,
-      });
-    }
-  }, 600);
+  if (willCollapse) {
+    doCollapse(room, playerIdx);
+  }
 }
 
 function doCollapse(room, winnerIdx) {
@@ -139,29 +118,33 @@ function doCollapse(room, winnerIdx) {
   const winner = room.players[winnerIdx];
   if (winner) winner.bal += net;
 
+  // Collapse details sent separately so clients can sequence the animation
   broadcast(room, {
     type: 'collapse',
-    winnerIdx: winnerIdx,
+    seq: room.seq,
+    winnerIdx,
     winnerName: winner ? winner.name : '???',
-    total: total,
-    net: net,
-    cut: cut,
+    total,
+    net,
+    cut,
     house: room.house,
+    // Send updated balances for all players
+    balances: room.players.map(p => p.bal),
   });
 
   room.stack = [];
   room.roundNum++;
 
-  // Resume after animation
-  setTimeout(() => {
+  // Resume after clients finish animation
+  if (room.collapseTimer) clearTimeout(room.collapseTimer);
+  room.collapseTimer = setTimeout(() => {
     room.collapsed = false;
-    room.busy = false;
+    room.collapseTimer = null;
 
-    // Send fresh state to everyone
+    // Fresh state sync to correct any drift
     for (let i = 0; i < room.players.length; i++) {
-      sendTo(room.players[i].ws, roomState(room, i));
+      sendTo(room.players[i].ws, fullState(room, i));
     }
-
     broadcast(room, { type: 'newRound', roundNum: room.roundNum });
   }, 2800);
 }
@@ -172,11 +155,12 @@ function removePlayer(room, playerIdx) {
 
   room.players.splice(playerIdx, 1);
 
-  // Fix stack pidx references
+  // Fix stack references
   room.stack = room.stack.filter(ch => ch.pidx !== playerIdx).map(ch => ({
-    ...ch,
     pidx: ch.pidx > playerIdx ? ch.pidx - 1 : ch.pidx,
   }));
+
+  room.seq++;
 
   broadcast(room, {
     type: 'playerLeft',
@@ -184,12 +168,11 @@ function removePlayer(room, playerIdx) {
     playerCount: room.players.length,
   });
 
-  // Send updated state to remaining players
+  // Full state resync for everyone
   for (let i = 0; i < room.players.length; i++) {
-    sendTo(room.players[i].ws, roomState(room, i));
+    sendTo(room.players[i].ws, fullState(room, i));
   }
 
-  // Clean up empty rooms after a delay
   if (room.players.length === 0) {
     setTimeout(() => {
       if (rooms.has(room.id) && rooms.get(room.id).players.length === 0) {
@@ -204,7 +187,6 @@ wss.on('connection', (ws, req) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   let roomId = url.searchParams.get('room');
 
-  // Create room if none specified
   if (!roomId || !rooms.has(roomId)) {
     if (!roomId) roomId = genRoomId();
     if (!rooms.has(roomId)) rooms.set(roomId, createRoom(roomId));
@@ -223,13 +205,13 @@ wss.on('connection', (ws, req) => {
     id: crypto.randomBytes(4).toString('hex'),
     name: pickName(room),
     col: COLORS[playerIdx % COLORS.length],
-    ws: ws,
+    ws,
     bal: 100,
     drops: 0,
   };
   room.players.push(player);
+  room.seq++;
 
-  // Tell the new player their info + full state
   sendTo(ws, {
     type: 'welcome',
     roomId: room.id,
@@ -237,34 +219,28 @@ wss.on('connection', (ws, req) => {
     yourName: player.name,
     yourCol: player.col,
   });
-  sendTo(ws, roomState(room, playerIdx));
+  sendTo(ws, fullState(room, playerIdx));
 
-  // Tell everyone else
   broadcast(room, {
     type: 'playerJoined',
     name: player.name,
     col: player.col,
     playerCount: room.players.length,
-  }, ws);
+  });
 
-  // Send updated state to all existing players
+  // Resync everyone so they see the new player
   for (let i = 0; i < room.players.length; i++) {
     if (room.players[i].ws !== ws) {
-      sendTo(room.players[i].ws, roomState(room, i));
+      sendTo(room.players[i].ws, fullState(room, i));
     }
   }
 
   ws.on('message', (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
-
-    // Find current index (may shift if someone left)
     const idx = room.players.findIndex(p => p.ws === ws);
     if (idx === -1) return;
-
-    if (msg.type === 'drop') {
-      handleDrop(room, idx);
-    }
+    if (msg.type === 'drop') handleDrop(room, idx);
   });
 
   ws.on('close', () => {
@@ -275,7 +251,6 @@ wss.on('connection', (ws, req) => {
 
 // ===== SERVE STATIC =====
 app.get('/', (req, res) => {
-  // If no room param, create one and redirect
   if (!req.query.room) {
     const roomId = genRoomId();
     rooms.set(roomId, createRoom(roomId));
