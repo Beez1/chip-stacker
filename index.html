@@ -103,7 +103,7 @@ canvas{display:block}
 </div>
 <div class="gw">
   <div class="pn">
-    <div class="pt"><h3>Game Room</h3><span class="badge" id="pcount">0/6</span></div>
+    <div class="pt"><h3>Game Room</h3><span class="badge" id="pcount">0/20</span></div>
     <div class="multi-box" id="mbox"><div class="multi-label">Multiplier</div><div class="multi-val" id="multi">1.00x</div></div>
     <div class="bal-box"><div class="bal-label">Your Balance</div><div class="bal-val" id="bal">100p</div></div>
     <div class="sr"><span class="l">Your Bet</span><span class="v" id="mybet">0p</span></div>
@@ -338,8 +338,8 @@ function handleMsg(msg){
       break;
 
     case'allCashedOut':addLog('Everyone cashed out! Round ends.','s');gameState='waiting';updUI();break;
-    case'playerJoined':addLog(msg.name+' joined ('+msg.playerCount+'/6)','s');break;
-    case'playerLeft':addLog(msg.name+' left ('+msg.playerCount+'/6)','s');break;
+    case'playerJoined':addLog(msg.name+' joined ('+msg.playerCount+'/20)','s');break;
+    case'playerLeft':addLog(msg.name+' left ('+msg.playerCount+'/20)','s');break;
     case'emoji':
       if(msg.pidx<players.length){var em=EMOJIS[msg.id]||'\u{1F525}';floatingEmojis.push({emoji:em,x:CX+(Math.random()-.5)*100,y:GY-100,life:90,ml:90,col:players[msg.pidx].col});}break;
     case'error':addLog('Error: '+msg.msg,'b');setConn('bad',msg.msg);break;
@@ -478,7 +478,7 @@ function updUI(){
   pe.textContent=(pnl>=0?'+':'')+Math.round(pnl)+'p';pe.className='v '+(pnl>=0?'pos':'neg');
   document.getElementById('mybet').textContent=(myP&&myP.roundBet?myP.roundBet:0)+'p';
   document.getElementById('ht').textContent=house.toFixed(1);
-  document.getElementById('pcount').textContent=players.length+'/6';
+  document.getElementById('pcount').textContent=players.length+'/20';
 
   // Player list (safe DOM)
   var pKey='';for(var i=0;i<players.length;i++){var p=players[i];pKey+=p.name+p.col+(p.roundBet||0)+(p.cashedOut?'o':'a')+(p.isYou?'y':'');}
@@ -495,7 +495,7 @@ function updUI(){
       }else{st.className='pstat wait';st.textContent='\u2014';}
       row.appendChild(av);row.appendChild(nm);row.appendChild(st);pl.appendChild(row);
     }
-    for(var i=players.length;i<6;i++){var es=document.createElement('div');es.className='es';es.textContent='Waiting...';pl.appendChild(es);}
+    if(players.length<20){var es=document.createElement('div');es.className='es';es.textContent=players.length+'/20 players';pl.appendChild(es);}
     lastPH=pKey;
   }
 

@@ -10,7 +10,7 @@ const wss = new WebSocketServer({ server });
 
 const PORT = process.env.PORT || 3000;
 const HCUT = 0.015;
-const MAX_PLAYERS = 6;
+const MAX_PLAYERS = 20;
 const DROP_COOLDOWN = 250;
 const EMOJI_COOLDOWN = 2000;
 const COUNTDOWN_SEC = 4;
