@@ -11,8 +11,10 @@ const wss = new WebSocketServer({ server });
 const PORT = process.env.PORT || 3000;
 const HCUT = 0.015;
 const MAX_PLAYERS = 20;
-const DROP_COOLDOWN_MS = 200; // rate limit: 1 drop per 200ms per player
+const DROP_COOLDOWN_MS = 200;
 const COLLAPSE_RESUME_MS = 5500;
+const IDLE_TIMEOUT_MS = 60000; // kick after 60s of no messages
+const PING_INTERVAL_MS = 15000;
 
 const NAMES = [
   'CryptoKing','LuckyLucy','NightOwl','BettyBoom','IceCold420',
@@ -273,7 +275,24 @@ wss.on('connection', (ws, req) => {
     }
   }
 
+  // Idle timeout + ping/pong keepalive
+  player.alive = true;
+  player.lastActivity = Date.now();
+  const pingTimer = setInterval(() => {
+    if (!player.alive) { ws.terminate(); clearInterval(pingTimer); return; }
+    if (Date.now() - player.lastActivity > IDLE_TIMEOUT_MS) {
+      console.log(`[${room.id}] ${player.name} idle timeout`);
+      ws.terminate(); clearInterval(pingTimer); return;
+    }
+    player.alive = false;
+    if (ws.readyState === 1) ws.ping();
+  }, PING_INTERVAL_MS);
+
+  ws.on('pong', () => { player.alive = true; });
+
   ws.on('message', (raw) => {
+    player.alive = true;
+    player.lastActivity = Date.now();
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
     const idx = room.players.findIndex(p => p.ws === ws);
@@ -282,6 +301,7 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
+    clearInterval(pingTimer);
     const idx = room.players.findIndex(p => p.ws === ws);
     if (idx !== -1) removePlayer(room, idx);
   });

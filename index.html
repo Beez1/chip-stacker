@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <title>Chip Stacker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
@@ -50,7 +50,7 @@ body{background:var(--bg);color:var(--t1);font-family:var(--f);display:flex;flex
 .hs{margin-top:8px;padding-top:8px;border-top:1px solid var(--bdr);text-align:center;font-size:.6em;color:var(--t4);font-weight:500;letter-spacing:1px}
 .ga{position:relative}
 .cw{position:relative;border-radius:14px;overflow:hidden;border:1px solid var(--bdr);box-shadow:0 8px 40px rgba(0,0,0,.5);cursor:pointer;touch-action:manipulation;background:var(--bg)}
-canvas{display:block}
+canvas{display:block;max-width:100%;height:auto}
 .pop{position:absolute;top:32%;left:50%;transform:translate(-50%,-50%) scale(.5);font-size:2em;font-weight:900;pointer-events:none;opacity:0;z-index:10;white-space:nowrap;letter-spacing:1px;font-family:var(--f);text-shadow:0 4px 24px rgba(0,0,0,.9)}
 .ev-label{position:absolute;top:16%;left:50%;transform:translateX(-50%);font-size:1.1em;font-weight:900;letter-spacing:4px;text-transform:uppercase;opacity:0;white-space:nowrap;font-family:var(--f);text-shadow:0 2px 20px rgba(0,0,0,.9);z-index:8;pointer-events:none}
 .ctrls{display:flex;gap:8px;margin-top:10px;justify-content:center}
@@ -95,7 +95,7 @@ canvas{display:block}
       <div class="pop" id="pop"></div>
     </div>
     <div class="ctrls"><button class="dbtn" id="dbtn">DROP 1p</button></div>
-    <div class="dh"><span class="kh">Space</span> or <span class="kh">Click</span> to drop</div>
+    <div class="dh" id="dhint"><span class="kh">Space</span> or <span class="kh">Click</span> to drop</div>
   </div>
   <div class="pn pf">
     <div class="pt"><h3>Live Feed</h3><span class="badge" style="color:var(--green)">LIVE</span></div>
@@ -115,7 +115,18 @@ var shake=0,house=0,collapsed=false,pendingCollapse=null;
 var screenFlash=0,screenFlashCol='#fff';
 // Canvas event animations
 var eventFx=null; // {type, t, dur, ...}
-var ambientDots=[]; // ambient floating particles
+// Offscreen grid cache
+var gridCanvas=document.createElement('canvas');gridCanvas.width=420;gridCanvas.height=680;
+var gctx=gridCanvas.getContext('2d');
+gctx.strokeStyle='rgba(255,255,255,.012)';gctx.lineWidth=1;
+for(var x=0;x<420;x+=40){gctx.beginPath();gctx.moveTo(x,0);gctx.lineTo(x,680);gctx.stroke();}
+for(var y=0;y<680;y+=40){gctx.beginPath();gctx.moveTo(0,y);gctx.lineTo(420,y);gctx.stroke();}
+
+// Color cache (avoid parseC every frame per chip)
+var colCache={};
+function getCachedCol(hex){if(colCache[hex])return colCache[hex];var rgb=parseC(hex);colCache[hex]={rgb:rgb,l35:lighten(hex,35),d45:darken(hex,45),l65:lighten(lighten(hex,35),30),d20:darken(hex,20)};return colCache[hex];}
+
+var ambientDots=[];
 for(var i=0;i<25;i++) ambientDots.push({x:Math.random()*420,y:Math.random()*680,vx:(Math.random()-.5)*.15,vy:-.1-Math.random()*.15,a:Math.random()*.3,sz:1+Math.random()*1.5});
 
 var EVENT_META={
@@ -436,17 +447,26 @@ function myDrop(){
   // Client-side rate limit
   var now=Date.now();if(myDrop._last&&(now-myDrop._last)<200)return;myDrop._last=now;
   var ox=(Math.random()-.5)*22;launchChip(myIdx,ox);players[myIdx].bal-=1;players[myIdx].drops++;
+  if(navigator.vibrate)navigator.vibrate(12);
   addLog(players[myIdx].name+' dropped 1p','d');updUI();
   ws.send(JSON.stringify({type:'drop',ox:ox}));pendingMyDrops++;
 }
 
 // WS
+var reconnectAttempts=0,reconnectTimer=null;
 function connect(){
   var proto=location.protocol==='https:'?'wss:':'ws:',room=new URLSearchParams(location.search).get('room')||'';
   ws=new WebSocket(proto+'//'+location.host+'/?room='+room);
-  ws.onopen=function(){connected=true;setConn('ok','Connected');};
-  ws.onclose=function(){connected=false;setConn('bad','Disconnected');};
-  ws.onerror=function(){setConn('bad','Error');};
+  ws.onopen=function(){connected=true;reconnectAttempts=0;setConn('ok','Connected');updUI();};
+  ws.onclose=function(){
+    connected=false;
+    var delay=Math.min(3000*Math.pow(1.5,reconnectAttempts),15000);
+    reconnectAttempts++;
+    setConn('wait','Reconnecting ('+reconnectAttempts+')...');updUI();
+    if(reconnectTimer)clearTimeout(reconnectTimer);
+    reconnectTimer=setTimeout(connect,delay);
+  };
+  ws.onerror=function(){};
   ws.onmessage=function(e){var msg;try{msg=JSON.parse(e.data);}catch(er){return;}handleMsg(msg);};
 }
 function handleMsg(msg){
@@ -477,7 +497,7 @@ function physics(){
   for(var i=0;i<stack.length;i++){var s=stack[i];s.sqv+=(1-s.sq)*.15;s.sqv*=.65;s.sq+=s.sqv;s.glow*=.92;s.vx*=.84;s.x+=s.vx;s.ang+=s.va;s.va*=.86;s.ang*=.9;var dr=s.x-CX;if(Math.abs(dr)>18)s.vx-=dr*.02;s.y+=(GY-(i+1)*CHH-s.y)*.3;}
   for(var i=fallers.length-1;i>=0;i--){var f=fallers[i];f.vy+=GRAV*.7;f.x+=f.vx;f.y+=f.vy;f.ang+=f.va;f.sqv+=(1-f.sq)*.1;f.sqv*=.6;f.sq+=f.sqv;if(f.x<15){f.x=15;f.vx*=-.5;}if(f.x>W-15){f.x=W-15;f.vx*=-.5;}if(f.y>GY-f.h/2){f.y=GY-f.h/2;f.vy*=-.3;f.vx*=.6;f.va*=.4;f.sq=.6;f.sqv=.05;if(Math.abs(f.vy)<.8)f.vy=0;}if(f.fadeTimer!==undefined){f.fadeTimer--;if(f.fadeTimer<=0)f.op-=.03;}if(f.x<-30||f.x>W+30||f.y<-50||f.y>H+30)f.op-=.06;if(f.op<=0)fallers.splice(i,1);}
   for(var i=sparks.length-1;i>=0;i--){upS(sparks[i]);if(sparks[i].life<=0)sparks.splice(i,1);}
-  if(sparks.length>300)sparks.splice(0,sparks.length-300);
+  if(sparks.length>300)sparks.length=300;
   updateEventFx();
   if(screenFlash>0){screenFlash*=.95;if(screenFlash<.01)screenFlash=0;}
   if(shake>0){shake*=.8;if(shake<.15)shake=0;}
@@ -490,11 +510,11 @@ function drawChip(ch,ox,oy,ang,opacity){
   var hw=ch.w/2,hh=ch.h/2,col=pidxCol(ch.pidx),sq=ch.sq||1;
   c.save();c.globalAlpha=opacity!==undefined?opacity:1;
   c.translate(ox,oy+hh);if(ang)c.rotate(ang);c.scale(1+(1-sq)*.5,sq);
-  var dp=Math.max(4,ch.h*.4),c1=col,c2=lighten(col,35),c3=darken(col,45);
+  var dp=Math.max(4,ch.h*.4),cc=getCachedCol(col),c1=col,c2=cc.l35,c3=cc.d45;
   if(ch.glow>.05){c.fillStyle=col+'44';c.beginPath();c.ellipse(0,hh,hw*1.3,dp*2,0,0,Math.PI*2);c.fill();}
   c.fillStyle='rgba(0,0,0,.25)';c.beginPath();c.ellipse(3,hh+5,hw*.85,dp*.4,0,0,Math.PI*2);c.fill();
   for(var dy=dp;dy>=0;dy-=2){c.fillStyle=lerpC(c3,c1,dy/dp);c.beginPath();c.ellipse(0,hh-dy*.6,hw,hh*.6,0,0,Math.PI*2);c.fill();}
-  var tg=c.createRadialGradient(-hw*.3,-hh*.3,0,0,0,hw);tg.addColorStop(0,lighten(c2,30));tg.addColorStop(.5,c1);tg.addColorStop(1,darken(c1,20));
+  var tg=c.createRadialGradient(-hw*.3,-hh*.3,0,0,0,hw);tg.addColorStop(0,cc.l65);tg.addColorStop(.5,c1);tg.addColorStop(1,cc.d20);
   c.fillStyle=tg;c.beginPath();c.ellipse(0,-hh*.15,hw,hh*.75,0,0,Math.PI*2);c.fill();
   c.strokeStyle='rgba(255,255,255,.12)';c.lineWidth=1;c.beginPath();c.ellipse(0,-hh*.15,hw*.6,hh*.45,0,0,Math.PI*2);c.stroke();
   var sg=c.createRadialGradient(-hw*.25,-hh*.5,0,-hw*.15,-hh*.3,hw*.5);sg.addColorStop(0,'rgba(255,255,255,.28)');sg.addColorStop(.6,'rgba(255,255,255,.04)');sg.addColorStop(1,'rgba(255,255,255,0)');
@@ -511,10 +531,8 @@ function drawScene(){
   c.fillStyle='rgba(255,255,255,.03)';
   for(var i=0;i<ambientDots.length;i++){var d=ambientDots[i];c.globalAlpha=d.a;c.beginPath();c.arc(d.x,d.y,d.sz,0,Math.PI*2);c.fill();}
   c.globalAlpha=1;
-  // Subtle grid
-  c.strokeStyle='rgba(255,255,255,.012)';c.lineWidth=1;
-  for(var x=0;x<W;x+=40){c.beginPath();c.moveTo(x,0);c.lineTo(x,H);c.stroke();}
-  for(var y=0;y<H;y+=40){c.beginPath();c.moveTo(0,y);c.lineTo(W,y);c.stroke();}
+  // Cached grid
+  c.drawImage(gridCanvas,0,0);
   // Vignette
   var vg=c.createRadialGradient(CX,H/2,H*.15,CX,H/2,H*.7);vg.addColorStop(0,'transparent');vg.addColorStop(1,'rgba(0,0,0,.5)');c.fillStyle=vg;c.fillRect(0,0,W,H);
   // Platform glow (intensifies with stack height)
@@ -582,16 +600,20 @@ function updUI(){
     lastPH=pKey;
   }
   var btn=document.getElementById('dbtn');btn.disabled=!connected||collapsed||!myP||myP.bal<1;
-  btn.textContent=!connected?'CONNECTING...':!myP?'JOINING...':myP.bal<1?'BROKE':'DROP 1p';
+  btn.textContent=!connected?'CONNECTING...':collapsed?'COLLAPSING...':!myP?'JOINING...':myP.bal<1?'BROKE':'DROP 1p';
 }
 function addLog(msg,cls){var el=document.getElementById('log'),d=document.createElement('div');d.className=cls;d.textContent='['+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'})+'] '+msg;el.prepend(d);while(el.children.length>80)el.removeChild(el.lastChild);}
 
 // Events
 document.getElementById('dbtn').addEventListener('click',function(){myDrop();});
 gc.addEventListener('click',function(){myDrop();});
-gc.addEventListener('touchstart',function(e){e.preventDefault();myDrop();},{passive:false});
+var touchDropped=false;
+gc.addEventListener('touchstart',function(e){e.preventDefault();if(!touchDropped){touchDropped=true;myDrop();if(navigator.vibrate)navigator.vibrate(15);}},{passive:false});
+gc.addEventListener('touchend',function(){touchDropped=false;});
 document.addEventListener('keydown',function(e){if(e.code==='Space'){e.preventDefault();myDrop();}});
 
+// Hide keyboard hints on touch devices
+if('ontouchstart' in window){var dh=document.getElementById('dhint');if(dh)dh.textContent='Tap to drop';}
 updUI();loop();connect();
 })();
 </script>
