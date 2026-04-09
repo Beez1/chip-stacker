@@ -455,8 +455,11 @@ function myDrop(){
 // WS
 var reconnectAttempts=0,reconnectTimer=null;
 function connect(){
-  var proto=location.protocol==='https:'?'wss:':'ws:',room=new URLSearchParams(location.search).get('room')||'';
-  ws=new WebSocket(proto+'//'+location.host+'/?room='+room);
+  var proto=location.protocol==='https:'?'wss:':'ws:';
+  var params=new URLSearchParams(location.search);
+  var room=params.get('room')||'';
+  var demo=params.get('demo')==='true'?'&demo=true':'';
+  ws=new WebSocket(proto+'//'+location.host+'/?room='+room+demo);
   ws.onopen=function(){connected=true;reconnectAttempts=0;setConn('ok','Connected');updUI();};
   ws.onclose=function(){
     connected=false;

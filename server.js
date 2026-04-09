@@ -275,6 +275,13 @@ wss.on('connection', (ws, req) => {
     }
   }
 
+  // Spawn demo bots if demo mode
+  const isDemo = url.searchParams.get('demo') === 'true';
+  if (isDemo && !room.bots && room.players.length <= 1) {
+    spawnBots(room, 5);
+    broadcastFullState(room);
+  }
+
   // Idle timeout + ping/pong keepalive
   player.alive = true;
   player.lastActivity = Date.now();
@@ -307,12 +314,86 @@ wss.on('connection', (ws, req) => {
   });
 });
 
+// ===== DEMO BOTS =====
+const BOT_NAMES = ['WhaleAlert','DiamondHands','RektCapital','SatoshiFlip','MoonBoi',
+  'DumpItDoris','PumpKing','FloorGang','GigaChad','YoloTrader'];
+
+function spawnBots(room, count) {
+  if (room.bots) return; // already spawned
+  room.bots = [];
+
+  for (let i = 0; i < count; i++) {
+    const bot = {
+      id: 'bot-' + crypto.randomBytes(2).toString('hex'),
+      name: sanitize(BOT_NAMES[i % BOT_NAMES.length]),
+      col: pickColor(room),
+      ws: null, // no real connection
+      bal: 100,
+      drops: 0,
+      lastDrop: 0,
+      isBot: true,
+      alive: true,
+      lastActivity: Date.now(),
+    };
+    room.players.push(bot);
+    room.seq++;
+
+    broadcast(room, {
+      type: 'playerJoined',
+      name: bot.name,
+      col: bot.col,
+      playerCount: room.players.length,
+    });
+  }
+
+  broadcastFullState(room);
+  console.log(`[${room.id}] Spawned ${count} demo bots`);
+
+  // Bot AI loop — each bot drops at random intervals
+  const botLoop = setInterval(() => {
+    if (room.collapsed || room.players.length === 0) return;
+
+    // Pick a random bot that has balance
+    const bots = room.players.filter(p => p.isBot && p.bal >= 1);
+    if (bots.length === 0) {
+      // Refill bots
+      room.players.forEach(p => { if (p.isBot) p.bal = 100; });
+      return;
+    }
+
+    const bot = bots[Math.floor(Math.random() * bots.length)];
+    const idx = room.players.indexOf(bot);
+    if (idx === -1) return;
+
+    const ox = (Math.random() - 0.5) * 22;
+    handleDrop(room, idx, ox);
+  }, 800 + Math.floor(Math.random() * 1200)); // drop every 0.8-2s
+
+  room.botLoop = botLoop;
+
+  // Cleanup when room empties
+  const origRemove = removePlayer;
+}
+
+function cleanupBots(room) {
+  if (room.botLoop) { clearInterval(room.botLoop); room.botLoop = null; }
+  if (room.bots) {
+    // Remove bot players
+    room.players = room.players.filter(p => !p.isBot);
+    room.bots = null;
+    room.seq++;
+    broadcastFullState(room);
+    console.log(`[${room.id}] Cleaned up demo bots`);
+  }
+}
+
 // ===== SERVE STATIC =====
 app.get('/', (req, res) => {
   if (!req.query.room) {
     const roomId = genRoomId();
     rooms.set(roomId, createRoom(roomId));
-    return res.redirect(`/?room=${roomId}`);
+    const demo = req.query.demo === 'true' ? '&demo=true' : '';
+    return res.redirect(`/?room=${roomId}${demo}`);
   }
   res.sendFile(path.join(__dirname, 'index.html'));
 });
