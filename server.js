@@ -208,6 +208,12 @@ function removePlayer(room, playerIdx) {
   broadcastFullState(room);
 
   // Clean up empty rooms (check reference identity to avoid deleting recreated rooms)
+  // If no real players left, clean up bots
+  const hasReal = room.players.some(p => !p.isBot);
+  if (!hasReal) {
+    cleanupBots(room);
+  }
+
   if (room.players.length === 0) {
     const roomRef = room;
     setTimeout(() => {
@@ -319,7 +325,7 @@ const BOT_NAMES = ['WhaleAlert','DiamondHands','RektCapital','SatoshiFlip','Moon
   'DumpItDoris','PumpKing','FloorGang','GigaChad','YoloTrader'];
 
 function spawnBots(room, count) {
-  if (room.bots) return; // already spawned
+  if (room.bots) return;
   room.bots = [];
 
   for (let i = 0; i < count; i++) {
@@ -327,7 +333,7 @@ function spawnBots(room, count) {
       id: 'bot-' + crypto.randomBytes(2).toString('hex'),
       name: sanitize(BOT_NAMES[i % BOT_NAMES.length]),
       col: pickColor(room),
-      ws: null, // no real connection
+      ws: null,
       bal: 100,
       drops: 0,
       lastDrop: 0,
@@ -335,54 +341,49 @@ function spawnBots(room, count) {
       alive: true,
       lastActivity: Date.now(),
     };
+    room.bots.push(bot);
     room.players.push(bot);
     room.seq++;
-
-    broadcast(room, {
-      type: 'playerJoined',
-      name: bot.name,
-      col: bot.col,
-      playerCount: room.players.length,
-    });
+    broadcast(room, { type: 'playerJoined', name: bot.name, col: bot.col, playerCount: room.players.length });
   }
 
   broadcastFullState(room);
   console.log(`[${room.id}] Spawned ${count} demo bots`);
 
-  // Bot AI loop — each bot drops at random intervals
-  const botLoop = setInterval(() => {
-    if (room.collapsed || room.players.length === 0) return;
+  // Bot AI loop — uses bot.id to find index safely (immune to splice reindexing)
+  room.botLoop = setInterval(() => {
+    if (room.collapsed) return;
+    // Check if any real players are still connected
+    const hasReal = room.players.some(p => !p.isBot);
+    if (!hasReal) { cleanupBots(room); return; }
 
-    // Pick a random bot that has balance
-    const bots = room.players.filter(p => p.isBot && p.bal >= 1);
-    if (bots.length === 0) {
-      // Refill bots
-      room.players.forEach(p => { if (p.isBot) p.bal = 100; });
+    // Pick a random bot with balance
+    const aliveBots = room.bots.filter(b => b.bal >= 1);
+    if (aliveBots.length === 0) {
+      room.bots.forEach(b => { b.bal = 100; }); // refill
       return;
     }
 
-    const bot = bots[Math.floor(Math.random() * bots.length)];
+    const bot = aliveBots[Math.floor(Math.random() * aliveBots.length)];
+    // Find by reference — safe even after splices
     const idx = room.players.indexOf(bot);
-    if (idx === -1) return;
+    if (idx === -1) return; // bot was removed
 
     const ox = (Math.random() - 0.5) * 22;
     handleDrop(room, idx, ox);
-  }, 800 + Math.floor(Math.random() * 1200)); // drop every 0.8-2s
-
-  room.botLoop = botLoop;
-
-  // Cleanup when room empties
-  const origRemove = removePlayer;
+  }, 1000 + Math.floor(Math.random() * 1500));
 }
 
 function cleanupBots(room) {
   if (room.botLoop) { clearInterval(room.botLoop); room.botLoop = null; }
   if (room.bots) {
-    // Remove bot players
     room.players = room.players.filter(p => !p.isBot);
+    room.stack = room.stack.filter(ch => {
+      const p = room.players[ch.pidx];
+      return p !== undefined;
+    });
     room.bots = null;
     room.seq++;
-    broadcastFullState(room);
     console.log(`[${room.id}] Cleaned up demo bots`);
   }
 }
